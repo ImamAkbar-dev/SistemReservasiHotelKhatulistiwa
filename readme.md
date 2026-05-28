@@ -2,7 +2,7 @@
 
 Project ini merupakan sistem sederhana untuk membantu pengelolaan reservasi hotel, khususnya bagi resepsionis agar proses pemesanan kamar jadi lebih cepat dan terorganisir. Sistem ini juga sudah mendukung pemesanan beberapa tipe kamar dalam satu transaksi sekaligus, serta dapat menghitung total biaya secara otomatis.
 
-## Anggota Kelompok
+## Anggota Kelompok 5
 1. Imam Akbar Arbain      D1041241013
 2. Rafli Gustiansyah      D1041241015
 3. Vincent Rian Jonathan  D1041241075
