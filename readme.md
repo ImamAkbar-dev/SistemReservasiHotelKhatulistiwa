@@ -62,3 +62,11 @@ Sistem ini menggunakan database MySQL dengan beberapa tabel utama yang saling te
    Aktifkan server di terminal VSCode dengan mengetik php -S localhost:8000".
    Setelah itu, buka browser dan akses:
    "http://localhost:8000/PROJECT_PHP/public/index.php"
+
+## Kredensial Login
+1. **Admin**
+   Username : admin1
+   Password : admin123
+2. **Resepsionis**
+   Username : resepsionis1
+   Password : resepsionis123
