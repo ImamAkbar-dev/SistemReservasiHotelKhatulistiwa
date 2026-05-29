@@ -74,6 +74,7 @@ $metodeList = $conn->query("SELECT id_Pembayaran, metode_Pembayaran FROM pembaya
         .modal-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
         .btn-proses { background: #059669; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; }
         .btn-batal { background: #E2E8F0; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; }
+        .error-msg { color: #EF4444; font-size: 0.85rem; margin-top: 10px; text-align: center; }
     </style>
 </head>
 <body>
@@ -150,9 +151,10 @@ $metodeList = $conn->query("SELECT id_Pembayaran, metode_Pembayaran FROM pembaya
             </select>
             <div id="tunaiField" style="display:none;">
                 <label>Jumlah Bayar (Rp)</label>
-                <input type="number" id="jumlah_bayar" name="jumlah_bayar" step="1000" min="0">
+                <input type="number" id="jumlah_bayar" name="jumlah_bayar" step="100" min="0">
                 <div id="kembalian" class="kembalian"></div>
             </div>
+            <div id="modalError" class="error-msg"></div>
             <div class="modal-buttons">
                 <button type="button" class="btn-batal" onclick="closeModal()">Batal</button>
                 <button type="submit" class="btn-proses">Proses</button>
@@ -168,12 +170,13 @@ $metodeList = $conn->query("SELECT id_Pembayaran, metode_Pembayaran FROM pembaya
         document.getElementById('modal_total_biaya').value = total;
         document.getElementById('total_biaya_display').value = 'Rp ' + new Intl.NumberFormat('id-ID').format(total);
         currentTotal = total;
-        document.getElementById('bayarModal').style.display = 'flex';
-        // Reset
+        // Reset form dan error
         document.getElementById('metode_pembayaran').value = '';
         document.getElementById('tunaiField').style.display = 'none';
         document.getElementById('jumlah_bayar').value = '';
         document.getElementById('kembalian').innerHTML = '';
+        document.getElementById('modalError').innerHTML = '';
+        document.getElementById('bayarModal').style.display = 'flex';
     }
     function closeModal() {
         document.getElementById('bayarModal').style.display = 'none';
@@ -186,6 +189,8 @@ $metodeList = $conn->query("SELECT id_Pembayaran, metode_Pembayaran FROM pembaya
             document.getElementById('tunaiField').style.display = 'none';
             document.getElementById('jumlah_bayar').removeAttribute('required');
         }
+        // Hapus error saat mengganti metode
+        document.getElementById('modalError').innerHTML = '';
     });
     document.getElementById('jumlah_bayar').addEventListener('input', function() {
         let bayar = parseInt(this.value) || 0;
@@ -198,12 +203,15 @@ $metodeList = $conn->query("SELECT id_Pembayaran, metode_Pembayaran FROM pembaya
             div.innerHTML = 'Jumlah bayar kurang: Rp ' + new Intl.NumberFormat('id-ID').format(-kembalian);
             div.style.color = '#EF4444';
         }
+        // Hapus error umum
+        document.getElementById('modalError').innerHTML = '';
     });
     // Validasi sebelum submit
     document.getElementById('formPembayaran').addEventListener('submit', function(e) {
         let metode = document.getElementById('metode_pembayaran').value;
+        let errorDiv = document.getElementById('modalError');
         if (!metode) {
-            alert('Pilih metode pembayaran!');
+            errorDiv.innerHTML = 'Pilih metode pembayaran terlebih dahulu!';
             e.preventDefault();
             return false;
         }
@@ -211,11 +219,12 @@ $metodeList = $conn->query("SELECT id_Pembayaran, metode_Pembayaran FROM pembaya
         if (selectedText.toLowerCase() === 'cash' || selectedText.toLowerCase() === 'tunai') {
             let bayar = parseInt(document.getElementById('jumlah_bayar').value) || 0;
             if (bayar < currentTotal) {
-                alert('Jumlah bayar kurang dari total biaya!');
+                errorDiv.innerHTML = 'Jumlah bayar kurang dari total biaya!';
                 e.preventDefault();
                 return false;
             }
         }
+        // Jika valid, submit form
         return true;
     });
     // Tutup modal jika klik di luar
