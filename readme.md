@@ -65,8 +65,8 @@ Sistem ini menggunakan database MySQL dengan beberapa tabel utama yang saling te
 
 ## Kredensial Login
 1. **Admin**
-   Username : admin1
-   Password : admin123
+   * Username : admin1
+   * Password : admin123
 2. **Resepsionis**
-   Username : resepsionis1
-   Password : resepsionis123
+   * Username : resepsionis1
+   * Password : resepsionis123
