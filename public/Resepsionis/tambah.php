@@ -33,8 +33,6 @@ $kamar_data = $conn->query("SELECT id_Kamar, nomor_Kamar, id_Tipe, status_Kamar 
         .btn-prev { background: #94A3B8; float: left; }
         .btn-back-top { background: none; border: none; color: #2563EB; cursor: pointer; font-size: 1.2rem; font-weight: bold; display: flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 20px; transition: 0.2s; position: absolute; top: 30px; left: 20px; }
         .btn-back-top:hover { background: #EFF6FF; }
-        
-        /* Multi-Type Selector Style */
         .type-row { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 10px; background: #F8FAFC; padding: 10px; border-radius: 8px; }
         .room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 10px; margin-top: 10px; padding: 15px; background: #F1F5F9; border-radius: 10px; }
         .room-item { padding: 15px 5px; text-align: center; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.8rem; border: 2px solid transparent; transition: 0.2s; }
@@ -42,7 +40,6 @@ $kamar_data = $conn->query("SELECT id_Kamar, nomor_Kamar, id_Tipe, status_Kamar 
         .room-unavailable { background: #E2E8F0; color: #94A3B8; cursor: not-allowed; }
         .room-selected { border-color: #2563EB; background: #2563EB; color: white; }
         .type-section { margin-top: 25px; border-left: 4px solid #2563EB; padding-left: 15px; }
-        /* Custom error popup */
         .error-popup { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #EF4444; color: white; padding: 12px 24px; border-radius: 30px; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.2); display: none; font-size: 0.9rem; text-align: center; white-space: nowrap; }
         @media (max-width: 600px) { .error-popup { white-space: normal; width: 90%; } }
     </style>
@@ -129,7 +126,64 @@ $kamar_data = $conn->query("SELECT id_Kamar, nomor_Kamar, id_Tipe, status_Kamar 
     const allRooms = <?= json_encode($kamar_data) ?>;
     const tipeKamarMap = <?= json_encode($tipe) ?>;
     let selectedRooms = [];
-    
+
+    // ======================= VALIDASI TANGGAL =======================
+    function isValidDateRange() {
+        let check_in = document.getElementById('check_in').value;
+        let check_out = document.getElementById('check_out').value;
+        if (!check_in || !check_out) return true; // akan ditangani oleh required
+
+        let today = new Date();
+        today.setHours(0, 0, 0, 0);
+        let checkInDate = new Date(check_in);
+        let checkOutDate = new Date(check_out);
+
+        // Check-in tidak boleh kurang dari hari ini
+        if (checkInDate < today) {
+            showError('Tanggal check-in tidak boleh kurang dari hari ini');
+            return false;
+        }
+
+        // Check-out harus lebih besar dari check-in (sudah ada)
+        if (checkOutDate <= checkInDate) {
+            showError('Tanggal check-out harus setelah tanggal check-in');
+            return false;
+        }
+
+        // Lama menginap tidak lebih dari 30 hari
+        let diffDays = Math.ceil((checkOutDate - checkInDate) / (1000 * 60 * 60 * 24));
+        if (diffDays > 30) {
+            showError('Lama menginap tidak boleh lebih dari 30 hari');
+            return false;
+        }
+
+        return true;
+    }
+
+    // ======================= VALIDASI STOK TIPE KAMAR =======================
+    function checkStockAvailability() {
+        const typeRows = document.querySelectorAll('.type-row');
+        let stockMap = {};
+        allRooms.forEach(room => {
+            if (room.status_Kamar === 'Tersedia') {
+                stockMap[room.id_Tipe] = (stockMap[room.id_Tipe] || 0) + 1;
+            }
+        });
+
+        for (let row of typeRows) {
+            const tipeId = row.querySelector('.tipe-select').value;
+            if (!tipeId) continue;
+            const requested = parseInt(row.querySelector('.jumlah-input').value) || 0;
+            const available = stockMap[tipeId] || 0;
+            if (requested > available) {
+                const tipeName = Array.from(row.querySelector('.tipe-select').options).find(o => o.value === tipeId)?.text || tipeId;
+                showError(`Stok tidak mencukupi untuk tipe ${tipeName}. Tersedia: ${available}, diminta: ${requested}`);
+                return false;
+            }
+        }
+        return true;
+    }
+
     // ======================= VALIDASI STEP 1 =======================
     function validateStep1() {
         let nama = document.getElementById('nama_pelanggan').value.trim();
@@ -162,43 +216,31 @@ $kamar_data = $conn->query("SELECT id_Kamar, nomor_Kamar, id_Tipe, status_Kamar 
 
     // ======================= VALIDASI STEP 2 =======================
     function validateStep2() {
-        let check_in = document.getElementById('check_in').value;
-        let check_out = document.getElementById('check_out').value;
-        
-        if(check_in === '') {
-            showError('Tanggal check-in harus diisi');
-            return false;
-        }
-        if(check_out === '') {
-            showError('Tanggal check-out harus diisi');
-            return false;
-        }
-        if(new Date(check_in) >= new Date(check_out)) {
-            showError('Tanggal check-out harus setelah tanggal check-in');
-            return false;
-        }
-        
-        // Validasi tipe kamar: pastikan minimal satu baris tipe dipilih dan tidak ada select yang kosong
+        // Validasi tanggal
+        if (!isValidDateRange()) return false;
+
+        // Validasi tipe kamar
         const typeRows = document.querySelectorAll('.type-row');
         if(typeRows.length === 0) {
             showError('Minimal pilih satu tipe kamar');
             return false;
         }
         
-        let valid = true;
-        typeRows.forEach(row => {
+        for (let row of typeRows) {
             const select = row.querySelector('.tipe-select');
             if(select.value === '') {
                 showError('Semua baris tipe kamar harus dipilih jenisnya');
-                valid = false;
+                return false;
             }
             const jumlah = parseInt(row.querySelector('.jumlah-input').value);
             if(isNaN(jumlah) || jumlah < 1) {
                 showError('Jumlah kamar minimal 1');
-                valid = false;
+                return false;
             }
-        });
-        if(!valid) return false;
+        }
+        
+        // Cek stok
+        if (!checkStockAvailability()) return false;
         
         return true;
     }
@@ -228,12 +270,10 @@ $kamar_data = $conn->query("SELECT id_Kamar, nomor_Kamar, id_Tipe, status_Kamar 
         const originalRow = container.children[0];
         const newRow = originalRow.cloneNode(true);
         newRow.querySelector('.jumlah-input').value = 1;
-        // reset select value ke default
         newRow.querySelector('.tipe-select').value = '';
         container.appendChild(newRow);
     }
 
-    // Fungsi navigasi dengan validasi
     function nextStep(step) {
         if(step === 2) {
             if(!validateStep1()) return;
@@ -267,7 +307,7 @@ $kamar_data = $conn->query("SELECT id_Kamar, nomor_Kamar, id_Tipe, status_Kamar 
             const qty = parseInt(row.querySelector('.jumlah-input').value);
             const tipeName = Array.from(row.querySelector('.tipe-select').options).find(o => o.value == tipeId).text;
             
-            if(!tipeId) return; // skip jika tidak terpilih (sudah divalidasi sebelumnya)
+            if(!tipeId) return;
             
             const section = document.createElement('div');
             section.className = 'type-section';
