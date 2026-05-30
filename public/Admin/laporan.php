@@ -6,21 +6,53 @@ if(!isset($_SESSION['user']) || $_SESSION['user']['role'] != 'admin') {
 }
 require_once '../../config/database.php';
 
-// Ambil periode dari GET
-$periode_awal = isset($_GET['periode_awal']) && $_GET['periode_awal'] !== '' ? $_GET['periode_awal'] : null;
-$periode_akhir = isset($_GET['periode_akhir']) && $_GET['periode_akhir'] !== '' ? $_GET['periode_akhir'] : null;
+$granularitas = isset($_GET['granularitas']) ? $_GET['granularitas'] : 'hari'; // default 'hari'
 
-// Ambil granularitas (hari, bulan, tahun)
-$granularitas = isset($_GET['granularitas']) ? $_GET['granularitas'] : 'bulan';
+// Ambil nilai periode dari GET (bisa kosong)
+$periode_awal_raw = isset($_GET['periode_awal']) && $_GET['periode_awal'] !== '' ? $_GET['periode_awal'] : null;
+$periode_akhir_raw = isset($_GET['periode_akhir']) && $_GET['periode_akhir'] !== '' ? $_GET['periode_akhir'] : null;
 
-// Jika periode kosong, ambil min dan max dari database
-if (!$periode_awal || !$periode_akhir) {
+// Fungsi untuk mendapatkan range tanggal dari database (min dan max tanggal_Check_In)
+function getDatabaseMinMax($conn) {
     $range = $conn->query("SELECT MIN(tanggal_Check_In) as min_tgl, MAX(tanggal_Check_In) as max_tgl FROM reservasi")->fetch();
-    $periode_awal = $periode_awal ?: ($range['min_tgl'] ?? date('Y-m-01'));
-    $periode_akhir = $periode_akhir ?: ($range['max_tgl'] ?? date('Y-m-t'));
+    return [$range['min_tgl'], $range['max_tgl']];
 }
 
-// Query total keseluruhan untuk kartu statistik
+// Konversi input menjadi tanggal mulai dan akhir (untuk query SQL)
+function getDateRangeForQuery($granularitas, $awal_raw, $akhir_raw, $conn) {
+    if (!$awal_raw || !$akhir_raw) {
+        list($min_date, $max_date) = getDatabaseMinMax($conn);
+        if ($granularitas == 'hari') {
+            return [$min_date, $max_date];
+        } elseif ($granularitas == 'bulan') {
+            // Ubah ke tanggal pertama dan terakhir dari bulan pertama dan bulan terakhir
+            $start = $min_date ? date('Y-m-01', strtotime($min_date)) : date('Y-m-01');
+            $end = $max_date ? date('Y-m-t', strtotime($max_date)) : date('Y-m-t');
+            return [$start, $end];
+        } else { // tahun
+            $start = $min_date ? date('Y-01-01', strtotime($min_date)) : date('Y-01-01');
+            $end = $max_date ? date('Y-12-31', strtotime($max_date)) : date('Y-12-31');
+            return [$start, $end];
+        }
+    }
+    // Jika sudah ada input, konversi sesuai granularitas
+    if ($granularitas == 'hari') {
+        return [$awal_raw, $akhir_raw];
+    } elseif ($granularitas == 'bulan') {
+        // Input bulan dalam format YYYY-MM, jadikan tanggal 1 dan akhir bulan
+        $start = date('Y-m-01', strtotime($awal_raw . '-01'));
+        $end = date('Y-m-t', strtotime($akhir_raw . '-01'));
+        return [$start, $end];
+    } else { // tahun
+        $start = $awal_raw . '-01-01';
+        $end = $akhir_raw . '-12-31';
+        return [$start, $end];
+    }
+}
+
+list($periode_awal, $periode_akhir) = getDateRangeForQuery($granularitas, $periode_awal_raw, $periode_akhir_raw, $conn);
+
+// Hitung statistik
 $sqlStats = "SELECT 
                 COUNT(*) AS total_reservasi,
                 COALESCE(SUM(total_Kamar), 0) AS total_kamar_dipesan,
@@ -35,18 +67,16 @@ $total_reservasi = number_format($data['total_reservasi']);
 $total_kamar = number_format($data['total_kamar_dipesan']);
 $total_pendapatan = 'Rp ' . number_format($data['total_pendapatan'], 0, ',', '.');
 
-// Query grafik berdasarkan granularitas
+// Query grafik
 $labels = [];
 $values = [];
 
 if ($granularitas == 'hari') {
-    $sqlChart = "SELECT 
-                    tanggal_Check_In as tgl,
-                    SUM(total_Biaya) as pendapatan
+    $sqlChart = "SELECT tanggal_Check_In as tgl, SUM(total_Biaya) as pendapatan
                 FROM reservasi
                 WHERE tanggal_Check_In BETWEEN :awal AND :akhir
                 GROUP BY tanggal_Check_In
-                ORDER BY tanggal_Check_In ASC";
+                ORDER BY tgl ASC";
     $stmtChart = $conn->prepare($sqlChart);
     $stmtChart->execute([':awal' => $periode_awal, ':akhir' => $periode_akhir]);
     $chartData = $stmtChart->fetchAll();
@@ -55,9 +85,7 @@ if ($granularitas == 'hari') {
         $values[] = $row['pendapatan'];
     }
 } elseif ($granularitas == 'tahun') {
-    $sqlChart = "SELECT 
-                    YEAR(tanggal_Check_In) as tahun,
-                    SUM(total_Biaya) as pendapatan
+    $sqlChart = "SELECT YEAR(tanggal_Check_In) as tahun, SUM(total_Biaya) as pendapatan
                 FROM reservasi
                 WHERE tanggal_Check_In BETWEEN :awal AND :akhir
                 GROUP BY YEAR(tanggal_Check_In)
@@ -69,10 +97,8 @@ if ($granularitas == 'hari') {
         $labels[] = $row['tahun'];
         $values[] = $row['pendapatan'];
     }
-} else { // bulan (default)
-    $sqlChart = "SELECT 
-                    DATE_FORMAT(tanggal_Check_In, '%Y-%m') as bulan,
-                    SUM(total_Biaya) as pendapatan
+} else { // bulan
+    $sqlChart = "SELECT DATE_FORMAT(tanggal_Check_In, '%Y-%m') as bulan, SUM(total_Biaya) as pendapatan
                 FROM reservasi
                 WHERE tanggal_Check_In BETWEEN :awal AND :akhir
                 GROUP BY DATE_FORMAT(tanggal_Check_In, '%Y-%m')
@@ -85,6 +111,20 @@ if ($granularitas == 'hari') {
         $labels[] = $date->format('M Y');
         $values[] = $row['pendapatan'];
     }
+}
+
+// Untuk menampilkan nilai default di form input (sesuai granularitas)
+$display_awal = '';
+$display_akhir = '';
+if ($granularitas == 'hari') {
+    $display_awal = $periode_awal;
+    $display_akhir = $periode_akhir;
+} elseif ($granularitas == 'bulan') {
+    $display_awal = date('Y-m', strtotime($periode_awal));
+    $display_akhir = date('Y-m', strtotime($periode_akhir));
+} else {
+    $display_awal = date('Y', strtotime($periode_awal));
+    $display_akhir = date('Y', strtotime($periode_akhir));
 }
 ?>
 <!DOCTYPE html>
@@ -129,10 +169,12 @@ if ($granularitas == 'hari') {
         .chart-card h3 { margin-bottom: 20px; color: #1E3A8A; font-weight: 600; }
         canvas { max-height: 400px; width: 100%; }
         footer { text-align: center; margin-top: 40px; color: #94A3B8; font-size: 0.8rem; }
-        @media (max-width: 640px) { body { padding: 20px; } .stat-number { font-size: 2rem; } }
+        .error-popup { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #EF4444; color: white; padding: 12px 24px; border-radius: 30px; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.2); display: none; font-size: 0.9rem; white-space: nowrap; }
+        @media (max-width: 640px) { body { padding: 20px; } .stat-number { font-size: 2rem; } .error-popup { white-space: normal; width: 90%; } }
     </style>
 </head>
 <body>
+<div class="error-popup" id="errorPopup"></div>
 <div class="container">
     <div class="dashboard-header">
         <div class="logo-area">
@@ -148,24 +190,17 @@ if ($granularitas == 'hari') {
     </div>
 
     <div class="filter-card">
-        <form method="GET" class="filter-group">
-            <div class="filter-inputs">
-                <div>
-                    <label>📅 Dari</label>
-                    <input type="date" name="periode_awal" value="<?= htmlspecialchars($periode_awal) ?>">
-                </div>
-                <div>
-                    <label>📅 Sampai</label>
-                    <input type="date" name="periode_akhir" value="<?= htmlspecialchars($periode_akhir) ?>">
-                </div>
-                <div>
-                    <label>📊 Grafik per</label>
-                    <select name="granularitas">
-                        <option value="hari" <?= $granularitas == 'hari' ? 'selected' : '' ?>>Hari</option>
-                        <option value="bulan" <?= $granularitas == 'bulan' ? 'selected' : '' ?>>Bulan</option>
-                        <option value="tahun" <?= $granularitas == 'tahun' ? 'selected' : '' ?>>Tahun</option>
-                    </select>
-                </div>
+        <form method="GET" id="filterForm" class="filter-group">
+            <div class="filter-inputs" id="periodeInputs">
+                <!-- Dinamis oleh JavaScript -->
+            </div>
+            <div>
+                <label>📊 Grafik per</label>
+                <select name="granularitas" id="granularitas">
+                    <option value="hari" <?= $granularitas == 'hari' ? 'selected' : '' ?>>Hari</option>
+                    <option value="bulan" <?= $granularitas == 'bulan' ? 'selected' : '' ?>>Bulan</option>
+                    <option value="tahun" <?= $granularitas == 'tahun' ? 'selected' : '' ?>>Tahun</option>
+                </select>
             </div>
             <button type="submit" class="btn-filter">Tampilkan</button>
         </form>
@@ -189,7 +224,6 @@ if ($granularitas == 'hari') {
         </div>
     </div>
 
-    <!-- Grafik Pendapatan -->
     <div class="chart-card">
         <h3>📈 Pendapatan per <?= ucfirst($granularitas) ?> (Rp)</h3>
         <canvas id="revenueChart"></canvas>
@@ -201,6 +235,94 @@ if ($granularitas == 'hari') {
 </div>
 
 <script>
+    const granularitasSelect = document.getElementById('granularitas');
+    const periodeContainer = document.getElementById('periodeInputs');
+    let currentGranularitas = '<?= $granularitas ?>';
+    let currentAwal = '<?= $display_awal ?>';
+    let currentAkhir = '<?= $display_akhir ?>';
+
+    function showError(message) {
+        const popup = document.getElementById('errorPopup');
+        popup.textContent = message;
+        popup.style.display = 'block';
+        setTimeout(() => {
+            popup.style.display = 'none';
+        }, 4000);
+    }
+
+    function renderInputs() {
+        const granularitas = granularitasSelect.value;
+        let html = '';
+        const currentYear = new Date().getFullYear();
+        if (granularitas === 'hari') {
+            html = `
+                <div><label>📅 Dari</label><input type="date" name="periode_awal" id="periode_awal" value="${currentAwal}"></div>
+                <div><label>📅 Sampai</label><input type="date" name="periode_akhir" id="periode_akhir" value="${currentAkhir}"></div>
+            `;
+        } else if (granularitas === 'bulan') {
+            html = `
+                <div><label>📅 Dari bulan</label><input type="month" name="periode_awal" id="periode_awal" value="${currentAwal}"></div>
+                <div><label>📅 Sampai bulan</label><input type="month" name="periode_akhir" id="periode_akhir" value="${currentAkhir}"></div>
+            `;
+        } else { // tahun
+            html = `
+                <div><label>📅 Dari tahun</label><input type="number" name="periode_awal" id="periode_awal" value="${currentAwal}" min="2000"></div>
+                <div><label>📅 Sampai tahun</label><input type="number" name="periode_akhir" id="periode_akhir" value="${currentAkhir}" min="2000"></div>
+            `;
+        }
+        periodeContainer.innerHTML = html;
+        const awalInput = document.getElementById('periode_awal');
+        const akhirInput = document.getElementById('periode_akhir');
+        if (awalInput && akhirInput) {
+            awalInput.addEventListener('change', validateDates);
+            akhirInput.addEventListener('change', validateDates);
+        }
+    }
+
+    function validateDates() {
+        const granularitas = granularitasSelect.value;
+        const awal = document.getElementById('periode_awal').value;
+        const akhir = document.getElementById('periode_akhir').value;
+        if (!awal || !akhir) return true;
+        if (granularitas === 'hari') {
+            if (awal > akhir) {
+                showError('Tanggal awal tidak boleh lebih dari tanggal akhir');
+                return false;
+            }
+        } else if (granularitas === 'bulan') {
+            if (awal > akhir) {
+                showError('Bulan awal tidak boleh lebih dari bulan akhir');
+                return false;
+            }
+        } else {
+            if (parseInt(awal) > parseInt(akhir)) {
+                showError('Tahun awal tidak boleh lebih dari tahun akhir');
+                return false;
+            }
+        }
+        return true;
+    }
+
+    granularitasSelect.addEventListener('change', function() {
+        // Simpan nilai input sebelumnya (jika ada)
+        const oldAwal = document.getElementById('periode_awal')?.value || currentAwal;
+        const oldAkhir = document.getElementById('periode_akhir')?.value || currentAkhir;
+        currentAwal = oldAwal;
+        currentAkhir = oldAkhir;
+        renderInputs();
+    });
+
+    document.getElementById('filterForm').addEventListener('submit', function(e) {
+        if (!validateDates()) {
+            e.preventDefault();
+            return false;
+        }
+        return true;
+    });
+
+    renderInputs();
+
+    // Chart
     const ctx = document.getElementById('revenueChart').getContext('2d');
     new Chart(ctx, {
         type: 'bar',
@@ -224,13 +346,11 @@ if ($granularitas == 'hari') {
                     callbacks: {
                         label: function(context) {
                             let value = context.raw;
-                            return 'Rp ' + value.toLocaleString('id-ID');
+                            return 'Rp ' + new Intl.NumberFormat('id-ID').format(value);
                         }
                     }
                 },
-                legend: {
-                    position: 'top',
-                }
+                legend: { position: 'top' }
             },
             scales: {
                 y: {
